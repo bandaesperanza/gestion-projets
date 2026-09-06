@@ -1,0 +1,50 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function estConnecte() {
+      return request.auth != null;
+    }
+
+    function monRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function estChefOuAdmin() {
+      return estConnecte() && (monRole() == 'chef_de_projet' || monRole() == 'admin');
+    }
+
+    // Chaque utilisateur peut lire/modifier son propre profil.
+    // Seuls les chefs de projet / admins peuvent changer un rôle.
+    match /users/{userId} {
+      allow read: if estConnecte();
+      allow create: if request.auth.uid == userId;
+      allow update: if request.auth.uid == userId || estChefOuAdmin();
+      allow delete: if estChefOuAdmin();
+    }
+
+    // Projets : lecture pour tous les connectés, écriture réservée aux chefs de projet/admins
+    match /projects/{projectId} {
+      allow read: if estConnecte();
+      allow create, update, delete: if estChefOuAdmin();
+    }
+
+    // Tâches : lecture pour tous, création/modification pour tous les connectés
+    // (un technicien doit pouvoir déplacer ses propres tâches sur le Kanban),
+    // suppression réservée aux chefs de projet/admins
+    match /tasks/{taskId} {
+      allow read: if estConnecte();
+      allow create, update: if estConnecte();
+      allow delete: if estChefOuAdmin();
+    }
+
+    // Suivi de temps : chacun ne peut créer/modifier que ses propres saisies
+    match /timeEntries/{entryId} {
+      allow read: if estConnecte();
+      allow create: if estConnecte() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if estConnecte() &&
+        (resource.data.userId == request.auth.uid || estChefOuAdmin());
+    }
+  }
+}
